@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Model checkpoints & weights
+backend/checkpoints/
+*.pt
+*.pth
+
+# Generated outputs
+backend/outputs/
+
+# Dataset
+backend/data/
+*.musdb
+
+# Audio & image artifacts
+*.wav
+*.mp3
+*.flac
+*.png
+*.jpg
+
+# Jupyter
+.ipynb_checkpoints/
+backend/notebooks/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Env files
+.env
+*.env
