@@ -1,21 +1,20 @@
 import torch
 import torch.nn as nn
-
-STEMS = ["vocals", "drums", "bass", "other"]
+from app.data.irmas_dataset import INSTRUMENTS, INSTRUMENT_NAMES, NUM_CLASSES
 
 
 class InstrumentClassifier(nn.Module):
     """
-    CNN classifier for multi-label instrument activity detection.
+    CNN classifier for multi-label instrument detection using IRMAS classes.
 
-    Input:  mix magnitude  [B, 1, freq_bins, time_frames]
-    Output: logits         [B, 4]  (one per stem: vocals, drums, bass, other)
+    Input:  mel spectrogram  [B, 1, n_mels, time_frames]
+    Output: logits           [B, 11]  (one per IRMAS instrument)
 
-    Use BCEWithLogitsLoss during training.
-    Use predict_proba() at inference time to get per-stem probabilities.
+    Use BCEWithLogitsLoss during training (multi-label).
+    Use predict_proba() at inference time to get per-instrument probabilities.
     """
 
-    def __init__(self, base_channels: int = 32, num_classes: int = len(STEMS)):
+    def __init__(self, base_channels: int = 32, num_classes: int = NUM_CLASSES):
         super().__init__()
 
         c = base_channels

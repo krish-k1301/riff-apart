@@ -55,6 +55,9 @@ def parse_args() -> argparse.Namespace:
                         help="Path to a checkpoint to resume training from.")
     parser.add_argument("--lr-patience",    type=int,   default=5,
                         help="ReduceLROnPlateau patience (epochs).")
+    parser.add_argument("--device",         type=str,   default="xpu",
+                        choices=["xpu", "cpu", "cuda"],
+                        help="Device to train on (default: xpu).")
 
     return parser.parse_args()
 
@@ -109,7 +112,11 @@ def save_checkpoint(path: Path, model, optimizer, scheduler, epoch, train_loss, 
 def main():
     args = parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.device == "xpu" and not (hasattr(torch, "xpu") and torch.xpu.is_available()):
+        print("XPU not available, falling back to CPU.")
+        device = torch.device("cpu")
+    else:
+        device = torch.device(args.device)
     print(f"Device: {device}")
     print(f"Target: {args.target}")
 

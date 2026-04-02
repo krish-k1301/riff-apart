@@ -7,7 +7,8 @@ from fastapi.responses import Response
 
 from app.audio.loader import load_audio
 from app.audio.processor import AudioProcessor
-from app.models.classifier import InstrumentClassifier, STEMS
+from app.data.irmas_dataset import INSTRUMENTS, INSTRUMENT_NAMES
+from app.models.classifier import InstrumentClassifier
 from app.pipeline.inference import InferencePipeline
 
 router = APIRouter(prefix="/api")
@@ -73,35 +74,57 @@ async def separate(
 @router.post("/classify")
 async def classify(file: UploadFile = File(...)):
     """
-    Upload an audio file and receive per-stem activity probabilities.
+    Upload an audio file and receive per-instrument probabilities using IRMAS classifier.
 
-    Returns a JSON dict: {"vocals": 0.92, "drums": 0.87, "bass": 0.76, "other": 0.41}
+    Returns a JSON dict: {"cello": 0.02, "clarinet": 0.05, ..., "voice": 0.91}
     """
     classifier_path = _CHECKPOINTS_DIR / "classifier_best.pt"
     if not classifier_path.exists():
-        raise HTTPException(status_code=404, detail="Classifier model not found.")
-
-    processor = AudioProcessor(n_fft=_N_FFT, hop_length=_HOP_LENGTH, win_length=_WIN_LENGTH)
+        raise HTTPException(status_code=404, detail="Classifier model not found. Train it first with train_classifier.py.")
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
-        waveform, _ = load_audio(tmp_path, sr=_SR, mono=True)
-        # Use first 5 seconds for classification
-        waveform = waveform[:, : 5 * _SR]
+        from app.data.irmas_dataset import IRMASDataset
+        import numpy as np
+        import soundfile as sf
 
-        stft = processor.compute_stft(waveform)
-        mix_mag = processor.compute_magnitude(stft).unsqueeze(0)  # [1, 1, F, T]
+        # Load and preprocess audio the same way IRMASDataset does
+        audio, file_sr = sf.read(tmp_path, dtype="float32", always_2d=True)
+        audio = audio.mean(axis=1)
+
+        target_sr = 22050
+        if file_sr != target_sr:
+            target_len = int(len(audio) * target_sr / file_sr)
+            audio = np.interp(
+                np.linspace(0, len(audio) - 1, target_len),
+                np.arange(len(audio)),
+                audio,
+            ).astype(np.float32)
+
+        # Use first 3 seconds (same as training)
+        clip_samples = int(3.0 * target_sr)
+        if len(audio) < clip_samples:
+            audio = np.pad(audio, (0, clip_samples - len(audio)))
+        else:
+            audio = audio[:clip_samples]
+
+        dummy_ds = IRMASDataset.__new__(IRMASDataset)
+        dummy_ds.sr = target_sr
+        dummy_ds.n_fft = 1024
+        dummy_ds.hop_length = 512
+        dummy_ds.n_mels = 128
+        mel = dummy_ds._mel_spectrogram(audio).unsqueeze(0)  # [1, 1, n_mels, T]
 
         model = InstrumentClassifier()
         checkpoint = torch.load(classifier_path, map_location="cpu", weights_only=True)
-        state_dict = checkpoint.get("model_state_dict", checkpoint)
+        state_dict = checkpoint.get("model_state", checkpoint)
         model.load_state_dict(state_dict)
         model.eval()
 
-        probs = model.predict_proba(mix_mag).squeeze(0).tolist()
-        return {stem: round(prob, 4) for stem, prob in zip(STEMS, probs)}
+        probs = model.predict_proba(mel).squeeze(0).tolist()
+        return {INSTRUMENT_NAMES[inst]: round(prob, 4) for inst, prob in zip(INSTRUMENTS, probs)}
     finally:
         Path(tmp_path).unlink(missing_ok=True)
