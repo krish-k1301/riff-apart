@@ -9,40 +9,36 @@ from app.audio.loader import load_audio
 from app.audio.processor import AudioProcessor
 from app.data.irmas_dataset import INSTRUMENTS, INSTRUMENT_NAMES
 from app.models.classifier import InstrumentClassifier
-from app.pipeline.inference import InferencePipeline
+from app.pipeline.demucs_pipeline import DemucsPipeline, STEMS as DEMUCS_STEMS
 
 router = APIRouter(prefix="/api")
 
-VALID_TARGETS = {"vocals", "drums", "bass", "other"}
+VALID_TARGETS = set(DEMUCS_STEMS)  # drums, bass, other, vocals, guitar, piano
 _CHECKPOINTS_DIR = Path(__file__).parent.parent.parent / "checkpoints"
-_SR = 44100
-_N_FFT = 2048
-_HOP_LENGTH = 512
-_WIN_LENGTH = 2048
+
+# Shared pipeline instance — model is loaded lazily on first request
+_demucs: DemucsPipeline | None = None
 
 
-def _unet_path(target: str) -> Path:
-    path = _CHECKPOINTS_DIR / f"unet_{target}_best.pt"
-    if not path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"No trained model found for target '{target}'. Train it first with train.py.",
-        )
-    return path
+def _get_demucs() -> DemucsPipeline:
+    global _demucs
+    if _demucs is None:
+        _demucs = DemucsPipeline(device="cpu")
+    return _demucs
 
 
 @router.post("/separate")
 async def separate(
     file: UploadFile = File(...),
-    target: str = Query(..., description="vocals | drums | bass | other"),
+    target: str = Query(..., description="vocals | drums | bass | guitar | piano | other"),
 ):
     """
     Upload an audio file and receive the separated stem as a WAV download.
+    Powered by HTDemucs 6-stem (transformer model by Meta Research).
+    Supports: vocals, drums, bass, guitar, piano, other.
     """
     if target not in VALID_TARGETS:
         raise HTTPException(status_code=400, detail=f"target must be one of {sorted(VALID_TARGETS)}")
-
-    model_path = str(_unet_path(target))
 
     with tempfile.TemporaryDirectory() as tmpdir:
         input_path = str(Path(tmpdir) / "input.wav")
@@ -51,15 +47,7 @@ async def separate(
         with open(input_path, "wb") as f:
             f.write(await file.read())
 
-        pipeline = InferencePipeline(
-            model_path=model_path,
-            device="cpu",
-            sr=_SR,
-            n_fft=_N_FFT,
-            hop_length=_HOP_LENGTH,
-            win_length=_WIN_LENGTH,
-        )
-        pipeline.run(input_path, output_path)
+        _get_demucs().run_single(input_path, output_path, stem=target)
 
         with open(output_path, "rb") as f:
             audio_bytes = f.read()
@@ -68,6 +56,38 @@ async def separate(
         content=audio_bytes,
         media_type="audio/wav",
         headers={"Content-Disposition": f'attachment; filename="{target}_separated.wav"'},
+    )
+
+
+@router.post("/separate_all")
+async def separate_all(file: UploadFile = File(...)):
+    """
+    Upload an audio file and receive all 6 stems in a ZIP archive.
+    Stems: vocals, drums, bass, guitar, piano, other.
+    Powered by HTDemucs 6-stem (transformer model by Meta Research).
+    """
+    import io
+    import zipfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = str(Path(tmpdir) / "input.wav")
+        output_dir = str(Path(tmpdir) / "stems")
+
+        with open(input_path, "wb") as f:
+            f.write(await file.read())
+
+        output_paths = _get_demucs().run_all(input_path, output_dir)
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for stem, path in output_paths.items():
+                zf.write(path, arcname=f"{stem}.wav")
+        zip_bytes = zip_buffer.getvalue()
+
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="stems.zip"'},
     )
 
 
