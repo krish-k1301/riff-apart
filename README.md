@@ -2,17 +2,9 @@
 
 **built by a guitarist who got tired of bad stems**
 
-A full-stack music source separation app powered by Meta's HTDemucs. Upload any song, get 6 isolated stems — vocals, drums, bass, guitar, piano, other — all downloadable, no login required.
+A full-stack music source separation app powered by Meta's HTDemucs. Upload any song, get 6 isolated stems i.e. vocals, drums, bass, guitar, piano, other. All downloadable, no login required.
 
 ---
-
-## The story
-
-It started with *Beete Lamhe* by KK. The guitar intro on that track is something else , the tone, the phrasing, everything about it was stuck in my head. As a guitarist I wanted to figure out exactly what was going on in that part so I could dial in the same tone on my multiprocessor.
-
-I found a YouTube lesson for it, but tone is a whole different problem. I needed to actually hear the isolated guitar ,no vocals, no drums, just the guitar sitting in the mix. So I went to one of those online stem separators. It worked. But it wouldn't let me download the isolated track, capped me at 1 minute without logging in, and I was too lazy to log in.
-
-So I built Riff Apart instead.
 
 > Deployment coming soon.
 
