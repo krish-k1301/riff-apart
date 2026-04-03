@@ -161,11 +161,12 @@ def main():
         best_val_loss = ckpt.get("val_loss", float("inf"))
         print(f"  Resumed at epoch {start_epoch}, best val loss {best_val_loss:.6f}")
 
-    print(f"\nTraining for {args.epochs} epoch(s) from epoch {start_epoch}...\n")
+    end_epoch = max(args.epochs, start_epoch)
+    print(f"\nTraining from epoch {start_epoch} to {end_epoch}...\n")
     print(f"{'Epoch':>6}  {'Train L1':>10}  {'Val L1':>10}  {'LR':>10}  {'Saved':>6}")
     print("-" * 52)
 
-    for epoch in range(start_epoch, start_epoch + args.epochs):
+    for epoch in range(start_epoch, end_epoch + 1):
         train_loss = run_epoch(model, train_loader, optimizer, device, train=True)
         val_loss   = run_epoch(model, val_loader,   optimizer, device, train=False)
 
