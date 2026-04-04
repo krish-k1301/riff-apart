@@ -811,7 +811,7 @@ export default function App() {
       // Step 1: separate all stems (one Demucs inference run)
       const sepForm = new FormData();
       sepForm.append("file", f);
-      const sepRes = await fetch("/api/separate_all", {
+      const sepRes = await fetch(`${import.meta.env.VITE_API_URL || ""}/api/separate_all`, {
         method: "POST", body: sepForm, signal: controller.signal,
       });
       if (!sepRes.ok) {
