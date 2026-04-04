@@ -298,7 +298,7 @@ function Transport({ isPlaying, currentTime, duration, onPlayPause, onSeek, acti
 }
 
 // ─── STEM CARD ─────────────────────────────────────────────
-function StemCard({ stem, isActive, isMuted, audioUrl, onToggle, onMute, onSolo, currentTime, duration, audioRef }) {
+function StemCard({ stem, isActive, isMuted, audioUrl, onToggle, onMute, onSolo, currentTime, duration }) {
   const [hovered, setHovered] = useState(false);
 
   const handleDownload = () => {
@@ -324,15 +324,6 @@ function StemCard({ stem, isActive, isMuted, audioUrl, onToggle, onMute, onSolo,
         opacity: isMuted ? 0.4 : 1,
       }}
     >
-      {/* Hidden audio element — controlled by App */}
-      {audioUrl && (
-        <audio
-          ref={audioRef}
-          src={audioUrl}
-          style={{ display: "none" }}
-        />
-      )}
-
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{
@@ -517,9 +508,71 @@ export default function App() {
   const [showEaster, setShowEaster] = useState(false);
   const [error, setError] = useState(null);
 
-  const audioRefs = useRef({});   // { [stemId]: HTMLAudioElement }
+  // Web Audio API refs — sample-accurate multi-stem sync
+  const audioCtxRef = useRef(null);         // single shared AudioContext
+  const audioBuffersRef = useRef({});       // { [stemId]: AudioBuffer } decoded once on load
+  const gainNodesRef = useRef({});          // { [stemId]: GainNode } persistent, used for mute
+  const sourceNodesRef = useRef({});        // { [stemId]: AudioBufferSourceNode } fresh each play
+  const audioOffsetRef = useRef(0);         // song position (s) at last play/pause/seek event
+  const ctxTimeAtStartRef = useRef(0);      // audioCtx.currentTime value when last playback began
+  const isPlayingRef = useRef(false);       // mirror of isPlaying state for use inside rAF
+
   const abortRef = useRef(null);
   const rafRef = useRef(null);
+
+  // ── Decode stems into AudioBuffers whenever stemUrls are set ──
+  useEffect(() => {
+    if (Object.keys(stemUrls).length === 0) return;
+
+    const ctx = new AudioContext();
+    audioCtxRef.current = ctx;
+    audioBuffersRef.current = {};
+    gainNodesRef.current = {};
+    sourceNodesRef.current = {};
+    audioOffsetRef.current = 0;
+    ctxTimeAtStartRef.current = 0;
+
+    // Create one persistent GainNode per stem (for mute/solo)
+    activeStems.forEach(stem => {
+      const gain = ctx.createGain();
+      gain.gain.value = 1;
+      gain.connect(ctx.destination);
+      gainNodesRef.current[stem.id] = gain;
+    });
+
+    // Decode each blob into an AudioBuffer
+    activeStems.forEach(stem => {
+      const url = stemUrls[stem.id];
+      if (!url) return;
+      fetch(url)
+        .then(r => r.arrayBuffer())
+        .then(buf => ctx.decodeAudioData(buf))
+        .then(audioBuffer => {
+          audioBuffersRef.current[stem.id] = audioBuffer;
+          setDuration(prev => prev || audioBuffer.duration);
+        })
+        .catch(() => {});
+    });
+
+    return () => {
+      Object.values(sourceNodesRef.current).forEach(node => { try { node?.stop(0); } catch {} });
+      sourceNodesRef.current = {};
+      ctx.close();
+    };
+  }, [stemUrls]);
+
+  // ── rAF loop — compute currentTime from audio clock, not from <audio>.currentTime ──
+  useEffect(() => {
+    const tick = () => {
+      if (isPlayingRef.current && audioCtxRef.current) {
+        const elapsed = audioCtxRef.current.currentTime - ctxTimeAtStartRef.current;
+        setCurrentTime(audioOffsetRef.current + Math.max(0, elapsed));
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []); // empty — reads only refs
 
   // ── Keyboard shortcuts ──────────────────────────────────
   useEffect(() => {
@@ -527,129 +580,177 @@ export default function App() {
       if (state !== "done") return;
       const key = e.key.toUpperCase();
       const stem = activeStems.find((s) => s.shortcut === key);
-      if (stem && stemUrls[stem.id]) toggleStemPlay(stem.id);
+      if (stem && audioBuffersRef.current[stem.id]) toggleStemPlay(stem.id);
       if (e.key === " ") { e.preventDefault(); handlePlayPauseAll(); }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [state, activeStems, stemUrls, activeStemIds, isPlaying]);
-
-  // ── rAF loop to update currentTime from playing audio ──
-  useEffect(() => {
-    const tick = () => {
-      const playing = Object.entries(audioRefs.current).find(
-        ([id, audio]) => audio && !audio.paused && activeStemIds.has(id)
-      );
-      if (playing) {
-        setCurrentTime(playing[1].currentTime);
-        if (!duration && playing[1].duration) setDuration(playing[1].duration);
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [activeStemIds, duration]);
-
-  // ── Load duration from first available metadata ────────
-  const handleMetadata = useCallback((stemId) => {
-    const audio = audioRefs.current[stemId];
-    if (audio && audio.duration && !duration) {
-      setDuration(audio.duration);
-    }
-  }, [duration]);
-
-  // ── Set up audio element event listeners after stemUrls load ──
-  useEffect(() => {
-    activeStems.forEach(stem => {
-      const audio = audioRefs.current[stem.id];
-      if (!audio) return;
-      audio.onloadedmetadata = () => handleMetadata(stem.id);
-      audio.onended = () => {
-        setActiveStemIds(prev => { const n = new Set(prev); n.delete(stem.id); return n; });
-        setIsPlaying(false);
-      };
-    });
-  }, [stemUrls, activeStems]);
-
-  // ── Sync audio element pause/volume when activeStemIds or mute changes ──
-  // Play is handled directly in handlePlayPauseAll and toggleStemPlay to avoid
-  // double-play with stale currentTime that causes stems to desync.
-  useEffect(() => {
-    activeStems.forEach(stem => {
-      const audio = audioRefs.current[stem.id];
-      if (!audio || !stemUrls[stem.id]) return;
-      audio.volume = mutedIds.has(stem.id) ? 0 : 1;
-      if (!activeStemIds.has(stem.id) && !audio.paused) {
-        audio.pause();
-      }
-    });
-  }, [activeStemIds, mutedIds]);
+  }, [state, activeStems, activeStemIds, isPlaying]);
 
   // ── Transport controls ──────────────────────────────────
-  const handlePlayPauseAll = useCallback(() => {
+  const handlePlayPauseAll = useCallback(async () => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+
     if (isPlaying) {
-      // Pause all
-      Object.values(audioRefs.current).forEach(a => a?.pause());
+      // Pause: record current song position so we can resume from here
+      const elapsed = ctx.currentTime - ctxTimeAtStartRef.current;
+      audioOffsetRef.current += Math.max(0, elapsed);
+      Object.values(sourceNodesRef.current).forEach(node => { try { node?.stop(0); } catch {} });
+      sourceNodesRef.current = {};
+      isPlayingRef.current = false;
       setIsPlaying(false);
       setActiveStemIds(new Set());
     } else {
-      // Play all non-muted stems that have audio
-      const toPlay = new Set(
-        activeStems
-          .filter(s => stemUrls[s.id])
-          .map(s => s.id)
-      );
-      const startTime = currentTime;
-      toPlay.forEach(id => {
-        const audio = audioRefs.current[id];
-        if (audio) {
-          audio.currentTime = startTime;
-          audio.volume = mutedIds.has(id) ? 0 : 1;
-          audio.play().catch(() => {});
-        }
+      await ctx.resume(); // handle browsers that suspend AudioContext until user gesture
+
+      // Schedule all stems to start at the SAME future audio-clock tick → sample-accurate sync
+      const AHEAD = 0.05; // 50 ms gives the browser time to prepare all sources
+      const startAt = ctx.currentTime + AHEAD;
+      const offset = audioOffsetRef.current;
+      ctxTimeAtStartRef.current = startAt;
+
+      const newActiveIds = new Set();
+      activeStems.forEach(stem => {
+        const buffer = audioBuffersRef.current[stem.id];
+        const gain = gainNodesRef.current[stem.id];
+        if (!buffer || !gain) return;
+        if (offset >= buffer.duration) return; // seek past end — skip
+
+        gain.gain.value = mutedIds.has(stem.id) ? 0 : 1;
+
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(gain);
+        source.onended = () => {
+          setActiveStemIds(prev => {
+            const n = new Set(prev);
+            n.delete(stem.id);
+            if (n.size === 0) { isPlayingRef.current = false; setIsPlaying(false); }
+            return n;
+          });
+          delete sourceNodesRef.current[stem.id];
+        };
+        source.start(startAt, offset); // startAt is identical for every stem → perfect sync
+        sourceNodesRef.current[stem.id] = source;
+        newActiveIds.add(stem.id);
       });
-      setActiveStemIds(toPlay);
+
+      isPlayingRef.current = true;
+      setActiveStemIds(newActiveIds);
       setIsPlaying(true);
     }
-  }, [isPlaying, activeStems, stemUrls, currentTime, mutedIds]);
+  }, [isPlaying, activeStems, mutedIds]);
 
-  const handleSeek = useCallback((time) => {
+  const handleSeek = useCallback(async (time) => {
     setCurrentTime(time);
-    Object.values(audioRefs.current).forEach(audio => {
-      if (audio) audio.currentTime = time;
+    audioOffsetRef.current = time;
+
+    const ctx = audioCtxRef.current;
+    if (!ctx || !isPlaying) return;
+
+    // Stop current sources and restart from the new position, keeping the same stems active
+    Object.values(sourceNodesRef.current).forEach(node => { try { node?.stop(0); } catch {} });
+    sourceNodesRef.current = {};
+
+    await ctx.resume();
+    const AHEAD = 0.05;
+    const startAt = ctx.currentTime + AHEAD;
+    ctxTimeAtStartRef.current = startAt;
+
+    const newActiveIds = new Set();
+    activeStems.forEach(stem => {
+      if (!activeStemIds.has(stem.id)) return;
+      const buffer = audioBuffersRef.current[stem.id];
+      const gain = gainNodesRef.current[stem.id];
+      if (!buffer || !gain || time >= buffer.duration) return;
+
+      gain.gain.value = mutedIds.has(stem.id) ? 0 : 1;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(gain);
+      source.onended = () => {
+        setActiveStemIds(prev => {
+          const n = new Set(prev);
+          n.delete(stem.id);
+          if (n.size === 0) { isPlayingRef.current = false; setIsPlaying(false); }
+          return n;
+        });
+        delete sourceNodesRef.current[stem.id];
+      };
+      source.start(startAt, time);
+      sourceNodesRef.current[stem.id] = source;
+      newActiveIds.add(stem.id);
     });
-  }, []);
+    setActiveStemIds(newActiveIds);
+  }, [isPlaying, activeStems, activeStemIds, mutedIds]);
 
   // ── Individual stem toggle ──────────────────────────────
-  const toggleStemPlay = useCallback((id) => {
-    const audio = audioRefs.current[id];
-    if (!audio) return;
-    setActiveStemIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        audio.pause();
-        next.delete(id);
-        if (next.size === 0) setIsPlaying(false);
+  const toggleStemPlay = useCallback(async (id) => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+
+    if (activeStemIds.has(id)) {
+      // Stop just this stem
+      try { sourceNodesRef.current[id]?.stop(0); } catch {}
+      delete sourceNodesRef.current[id];
+      setActiveStemIds(prev => {
+        const n = new Set(prev);
+        n.delete(id);
+        if (n.size === 0) { isPlayingRef.current = false; setIsPlaying(false); }
+        return n;
+      });
+    } else {
+      const buffer = audioBuffersRef.current[id];
+      const gain = gainNodesRef.current[id];
+      if (!buffer || !gain) return;
+
+      await ctx.resume();
+      const AHEAD = 0.05;
+      const startAt = ctx.currentTime + AHEAD;
+
+      // Compute the correct buffer offset to stay in sync with any currently playing stems
+      let offset;
+      if (isPlaying) {
+        const elapsed = ctx.currentTime - ctxTimeAtStartRef.current;
+        offset = audioOffsetRef.current + Math.max(0, elapsed) + AHEAD;
       } else {
-        // Read live position from a currently playing element to avoid stale React state
-        const liveTime = Object.values(audioRefs.current).find(a => a && !a.paused)?.currentTime ?? currentTime;
-        audio.currentTime = liveTime;
-        audio.volume = mutedIds.has(id) ? 0 : 1;
-        audio.play().catch(() => {});
-        next.add(id);
+        offset = audioOffsetRef.current;
+        // First stem to start — anchor the time reference
+        ctxTimeAtStartRef.current = startAt;
+        isPlayingRef.current = true;
         setIsPlaying(true);
       }
-      return next;
-    });
-  }, [currentTime, mutedIds]);
+
+      if (offset >= buffer.duration) return;
+
+      gain.gain.value = mutedIds.has(id) ? 0 : 1;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(gain);
+      source.onended = () => {
+        setActiveStemIds(prev => {
+          const n = new Set(prev);
+          n.delete(id);
+          if (n.size === 0) { isPlayingRef.current = false; setIsPlaying(false); }
+          return n;
+        });
+        delete sourceNodesRef.current[id];
+      };
+      source.start(startAt, offset);
+      sourceNodesRef.current[id] = source;
+
+      setActiveStemIds(prev => { const n = new Set(prev); n.add(id); return n; });
+    }
+  }, [activeStemIds, isPlaying, mutedIds]);
 
   // ── Mute/Solo ───────────────────────────────────────────
   const toggleMute = (id) => {
     setMutedIds((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
-      const audio = audioRefs.current[id];
-      if (audio) audio.volume = next.has(id) ? 0 : 1;
+      const gain = gainNodesRef.current[id];
+      if (gain) gain.gain.value = next.has(id) ? 0 : 1;
       return next;
     });
     setSoloId(null);
@@ -658,28 +759,35 @@ export default function App() {
   const toggleSolo = (id) => {
     if (soloId === id) {
       setSoloId(null);
-      const newMuted = new Set();
-      setMutedIds(newMuted);
+      setMutedIds(new Set());
       activeStems.forEach(s => {
-        const audio = audioRefs.current[s.id];
-        if (audio) audio.volume = 1;
+        const gain = gainNodesRef.current[s.id];
+        if (gain) gain.gain.value = 1;
       });
     } else {
       setSoloId(id);
-      const newMuted = new Set(activeStems.filter((s) => s.id !== id).map((s) => s.id));
-      setMutedIds(newMuted);
+      setMutedIds(new Set(activeStems.filter(s => s.id !== id).map(s => s.id)));
       activeStems.forEach(s => {
-        const audio = audioRefs.current[s.id];
-        if (audio) audio.volume = s.id === id ? 1 : 0;
+        const gain = gainNodesRef.current[s.id];
+        if (gain) gain.gain.value = s.id === id ? 1 : 0;
       });
     }
   };
 
   // ── Main file processing ────────────────────────────────
   const handleFileSelect = async (f) => {
-    Object.values(stemUrls).forEach((url) => URL.revokeObjectURL(url));
-    Object.values(audioRefs.current).forEach(a => { if (a) a.pause(); });
-    audioRefs.current = {};
+    Object.values(stemUrls).forEach(url => URL.revokeObjectURL(url));
+    if (audioCtxRef.current) {
+      Object.values(sourceNodesRef.current).forEach(node => { try { node?.stop(0); } catch {} });
+      audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+    audioBuffersRef.current = {};
+    gainNodesRef.current = {};
+    sourceNodesRef.current = {};
+    audioOffsetRef.current = 0;
+    ctxTimeAtStartRef.current = 0;
+    isPlayingRef.current = false;
 
     setFile(f);
     setState("processing");
@@ -754,9 +862,18 @@ export default function App() {
   // ── Reset ───────────────────────────────────────────────
   const handleReset = () => {
     abortRef.current?.abort();
-    Object.values(stemUrls).forEach((url) => URL.revokeObjectURL(url));
-    Object.values(audioRefs.current).forEach(a => { if (a) a.pause(); });
-    audioRefs.current = {};
+    Object.values(stemUrls).forEach(url => URL.revokeObjectURL(url));
+    if (audioCtxRef.current) {
+      Object.values(sourceNodesRef.current).forEach(node => { try { node?.stop(0); } catch {} });
+      audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+    audioBuffersRef.current = {};
+    gainNodesRef.current = {};
+    sourceNodesRef.current = {};
+    audioOffsetRef.current = 0;
+    ctxTimeAtStartRef.current = 0;
+    isPlayingRef.current = false;
     setState("idle");
     setFile(null);
     setProgress(0);
@@ -953,10 +1070,17 @@ export default function App() {
                     {file?.name} · {activeStems.length} stems · keyboard shortcuts active
                   </div>
                 </div>
-                <button onClick={downloadAll} style={{
-                  padding: "8px 16px", borderRadius: "8px", border: "none", background: "var(--accent)",
-                  color: "var(--bg)", fontSize: "12px", fontWeight: "600", cursor: "pointer", fontFamily: "var(--font-mono)",
-                }}>&#8595; all stems</button>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button onClick={handlePlayPauseAll} style={{
+                    padding: "8px 16px", borderRadius: "8px", border: "1px solid var(--accent)",
+                    background: isPlaying ? "var(--accent)20" : "transparent",
+                    color: "var(--accent)", fontSize: "12px", fontWeight: "600", cursor: "pointer", fontFamily: "var(--font-mono)",
+                  }}>{isPlaying ? "⏸ pause all" : "▶ play all"}</button>
+                  <button onClick={downloadAll} style={{
+                    padding: "8px 16px", borderRadius: "8px", border: "none", background: "var(--accent)",
+                    color: "var(--bg)", fontSize: "12px", fontWeight: "600", cursor: "pointer", fontFamily: "var(--font-mono)",
+                  }}>&#8595; all stems</button>
+                </div>
               </div>
 
               <div className="stem-grid">
@@ -972,10 +1096,6 @@ export default function App() {
                       onSolo={() => toggleSolo(stem.id)}
                       currentTime={currentTime}
                       duration={duration}
-                      audioRef={(el) => {
-                        audioRefs.current[stem.id] = el;
-                        if (el) el.onloadedmetadata = () => handleMetadata(stem.id);
-                      }}
                     />
                   </div>
                 ))}
