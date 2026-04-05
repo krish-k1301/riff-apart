@@ -215,7 +215,7 @@ function Waveform({ color, isActive, audioUrl, height = 44, currentTime = 0, dur
 }
 
 // ─── TRANSPORT BAR ─────────────────────────────────────────
-function Transport({ isPlaying, currentTime, duration, onPlayPause, onSeek, activeStemIds, allStems }) {
+function Transport({ isPlaying, currentTime, duration, onPlayPause, onSeekChange, onSeekCommit, activeStemIds, allStems }) {
   const pct = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
@@ -227,12 +227,12 @@ function Transport({ isPlaying, currentTime, duration, onPlayPause, onSeek, acti
         {/* Play/Pause all */}
         <button
           onClick={onPlayPause}
-          disabled={activeStemIds.size === 0}
+          disabled={duration === 0}
           style={{
             width: "34px", height: "34px", borderRadius: "50%",
             border: "none",
-            background: activeStemIds.size > 0 ? "var(--accent)" : "var(--surface-2)",
-            color: "var(--bg)", cursor: activeStemIds.size > 0 ? "pointer" : "default",
+            background: duration > 0 ? "var(--accent)" : "var(--surface-2)",
+            color: "var(--bg)", cursor: duration > 0 ? "pointer" : "default",
             fontSize: "12px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
           }}
         >
@@ -258,7 +258,9 @@ function Transport({ isPlaying, currentTime, duration, onPlayPause, onSeek, acti
           <input
             type="range" min={0} max={duration || 100} step={0.05}
             value={currentTime}
-            onChange={(e) => onSeek(parseFloat(e.target.value))}
+            onChange={(e) => onSeekChange(parseFloat(e.target.value))}
+            onMouseUp={(e) => onSeekCommit(parseFloat(e.target.value))}
+            onTouchEnd={(e) => onSeekCommit(parseFloat(e.target.value))}
             style={{
               position: "absolute", top: "50%", left: 0, width: "100%",
               transform: "translateY(-50%)", opacity: 0, cursor: "pointer",
@@ -516,6 +518,7 @@ export default function App() {
   const audioOffsetRef = useRef(0);         // song position (s) at last play/pause/seek event
   const ctxTimeAtStartRef = useRef(0);      // audioCtx.currentTime value when last playback began
   const isPlayingRef = useRef(false);       // mirror of isPlaying state for use inside rAF
+  const lastPlayedStemIdsRef = useRef(new Set()); // stems that were active before last pause
 
   const abortRef = useRef(null);
   const rafRef = useRef(null);
@@ -593,9 +596,10 @@ export default function App() {
     if (!ctx) return;
 
     if (isPlaying) {
-      // Pause: record current song position so we can resume from here
+      // Pause: record current song position and which stems were active
       const elapsed = ctx.currentTime - ctxTimeAtStartRef.current;
       audioOffsetRef.current += Math.max(0, elapsed);
+      lastPlayedStemIdsRef.current = new Set(activeStemIds); // remember for resume
       Object.values(sourceNodesRef.current).forEach(node => { try { node?.stop(0); } catch {} });
       sourceNodesRef.current = {};
       isPlayingRef.current = false;
@@ -604,6 +608,11 @@ export default function App() {
     } else {
       await ctx.resume(); // handle browsers that suspend AudioContext until user gesture
 
+      // Resume only the stems that were playing before pause; on first play use all stems
+      const stemsToPlay = lastPlayedStemIdsRef.current.size > 0
+        ? activeStems.filter(s => lastPlayedStemIdsRef.current.has(s.id))
+        : activeStems;
+
       // Schedule all stems to start at the SAME future audio-clock tick → sample-accurate sync
       const AHEAD = 0.05; // 50 ms gives the browser time to prepare all sources
       const startAt = ctx.currentTime + AHEAD;
@@ -611,7 +620,7 @@ export default function App() {
       ctxTimeAtStartRef.current = startAt;
 
       const newActiveIds = new Set();
-      activeStems.forEach(stem => {
+      stemsToPlay.forEach(stem => {
         const buffer = audioBuffersRef.current[stem.id];
         const gain = gainNodesRef.current[stem.id];
         if (!buffer || !gain) return;
@@ -640,9 +649,16 @@ export default function App() {
       setActiveStemIds(newActiveIds);
       setIsPlaying(true);
     }
-  }, [isPlaying, activeStems, mutedIds]);
+  }, [isPlaying, activeStems, activeStemIds, mutedIds]);
 
-  const handleSeek = useCallback(async (time) => {
+  // Called on every drag tick — only update display, don't touch audio sources
+  const handleSeekDisplay = useCallback((time) => {
+    setCurrentTime(time);
+    audioOffsetRef.current = time;
+  }, []);
+
+  // Called on pointer-up — restart audio at new position if playing
+  const handleSeekCommit = useCallback(async (time) => {
     setCurrentTime(time);
     audioOffsetRef.current = time;
 
@@ -691,7 +707,11 @@ export default function App() {
     if (!ctx) return;
 
     if (activeStemIds.has(id)) {
-      // Stop just this stem
+      // Save current playback position before stopping so resume starts from here
+      const elapsed = ctx.currentTime - ctxTimeAtStartRef.current;
+      audioOffsetRef.current += Math.max(0, elapsed);
+      ctxTimeAtStartRef.current = ctx.currentTime;
+
       try { sourceNodesRef.current[id]?.stop(0); } catch {}
       delete sourceNodesRef.current[id];
       setActiveStemIds(prev => {
@@ -1106,7 +1126,8 @@ export default function App() {
                 currentTime={currentTime}
                 duration={duration}
                 onPlayPause={handlePlayPauseAll}
-                onSeek={handleSeek}
+                onSeekChange={handleSeekDisplay}
+                onSeekCommit={handleSeekCommit}
                 activeStemIds={activeStemIds}
                 allStems={activeStems}
               />
