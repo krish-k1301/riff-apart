@@ -50,14 +50,16 @@ npm install
 npm run dev
 ```
 
-music-separator/
-├── backend/
-│   ├── app/
-│   │   ├── audio/        # loader, processor, utils
-│   │   ├── models/       # U-Net, classifier
-│   │   ├── pipeline/     # Demucs pipeline, inference
-│   │   └── api/          # FastAPI routes
-│   ├── checkpoints/      # saved model weights
-│   ├── outputs/          # separated audio
-│   └── requirements.txt
-└── frontend/             # React + Vite app
+```md
+## Project layout
+
+- `backend/`
+  - `app/`
+    - `audio/` - loader, processor, utils
+    - `models/` - U-Net, classifier
+    - `pipeline/` - Demucs pipeline, inference
+    - `api/` - FastAPI routes
+  - `checkpoints/` - saved model weights
+  - `outputs/` - separated audio
+  - `requirements.txt`
+- `frontend/` - React + Vite app
