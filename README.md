@@ -4,12 +4,6 @@
 
 A full-stack music source separation app powered by Meta's HTDemucs. Upload any song, get 6 isolated stems i.e. vocals, drums, bass, guitar, piano, other. All downloadable, no login required.
 
----
-
-> Deployment coming soon.
-
----
-
 ## Stack
 
 - **Backend**: Python · FastAPI · PyTorch · Demucs (HTDemucs 6s) · librosa · soundfile
