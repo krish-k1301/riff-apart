@@ -41,3 +41,23 @@ A full-stack music source separation app powered by Meta's HTDemucs. Upload any 
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload
+```
+
+**Backend**
+```bash 
+cd frontend
+npm install
+npm run dev
+```
+
+music-separator/
+├── backend/
+│   ├── app/
+│   │   ├── audio/        # loader, processor, utils
+│   │   ├── models/       # U-Net, classifier
+│   │   ├── pipeline/     # Demucs pipeline, inference
+│   │   └── api/          # FastAPI routes
+│   ├── checkpoints/      # saved model weights
+│   ├── outputs/          # separated audio
+│   └── requirements.txt
+└── frontend/             # React + Vite app
