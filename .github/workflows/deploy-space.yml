@@ -1,0 +1,43 @@
+# Deploys backend/ to the Hugging Face Space on every push to main that touches it.
+# Needs a Hugging Face write token saved as the repo secret HF_TOKEN; until then it skips.
+name: Deploy backend to Hugging Face
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip without HF_TOKEN
+        if: env.HF_TOKEN == ''
+        run: echo "::warning::HF_TOKEN secret not set, so the Space was not updated."
+
+      - uses: actions/setup-python@v5
+        if: env.HF_TOKEN != ''
+        with:
+          python-version: "3.11"
+
+      - name: Upload backend/ to the Space
+        if: env.HF_TOKEN != ''
+        run: |
+          pip install --quiet huggingface_hub
+          python - <<'PY'
+          from huggingface_hub import HfApi
+          HfApi().upload_folder(
+              repo_id="krish-k1301/riff-apart",
+              repo_type="space",
+              folder_path="backend",
+              commit_message="Deploy ${{ github.sha }}",
+              ignore_patterns=["__pycache__/*", "*.pyc", "checkpoints/*", "outputs/*"],
+              # clear out old code and unused weights; the upload re-adds the current files
+              delete_patterns=["*.py", "*.pyc", "checkpoints/*", "__pycache__/*"],
+          )
+          PY

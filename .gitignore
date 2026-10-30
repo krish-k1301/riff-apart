@@ -49,3 +49,6 @@ frontend/dist/
 # Env files
 .env
 *.env
+
+# Claude Code
+.claude/
