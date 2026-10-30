@@ -1,12 +1,9 @@
+demucs
 torch
 torchaudio
-librosa
 numpy
-scipy
+soundfile>=0.13  # MP3 encoding with bitrate control
+librosa          # fallback decoder for m4a/aac (via ffmpeg)
 fastapi
 uvicorn
 python-multipart
-musdb
-soundfile
-matplotlib
-demucs
