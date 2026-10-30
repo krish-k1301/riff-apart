@@ -10,24 +10,13 @@ import StemSplit from "./components/StemSplit.jsx";
 
 // ─── STEM DEFINITIONS ──────────────────────────────────────
 const ALL_STEMS = [
-  { id: "vocals", name: "Vocals",  instrument: "Voice",         color: "#F4D58D", shortcut: "V" },
-  { id: "drums",  name: "Drums",   instrument: "Drums",         color: "#E5484D", shortcut: "D" },
-  { id: "bass",   name: "Bass",    instrument: "Bass Guitar",   color: "#4D96FF", shortcut: "B" },
-  { id: "guitar", name: "Guitar",  instrument: "Guitar",        color: "#46D39A", shortcut: "G" },
-  { id: "piano",  name: "Piano",   instrument: "Piano",         color: "#C77DFF", shortcut: "P" },
-  { id: "other",  name: "Other",   instrument: "Remaining Mix", color: "#8D99AE", shortcut: "O" },
+  { id: "vocals", name: "Vocals",  color: "#F4D58D", shortcut: "V" },
+  { id: "drums",  name: "Drums",   color: "#E5484D", shortcut: "D" },
+  { id: "bass",   name: "Bass",    color: "#4D96FF", shortcut: "B" },
+  { id: "guitar", name: "Guitar",  color: "#46D39A", shortcut: "G" },
+  { id: "piano",  name: "Piano",   color: "#C77DFF", shortcut: "P" },
+  { id: "other",  name: "Other",   color: "#8D99AE", shortcut: "O" },
 ];
-
-// Stems that are always shown regardless of classifier output
-const ALWAYS_INCLUDED = new Set(["drums", "bass", "other"]);
-
-// Map IRMAS instrument names (as returned by /api/classify) to Demucs stem ids
-const CLASSIFY_TO_STEM = {
-  "voice":            "vocals",
-  "electric guitar":  "guitar",
-  "acoustic guitar":  "guitar",
-  "piano":            "piano",
-};
 
 // ─── LOADING QUIPS ─────────────────────────────────────────
 const LOADING_QUIPS = [
@@ -67,30 +56,7 @@ const STEPS = [
 ];
 
 // ─── HELPERS ───────────────────────────────────────────────
-function formatTime(s) {
-  if (!s || isNaN(s)) return "0:00";
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, "0")}`;
-}
-
 const API = import.meta.env.VITE_API_URL || "";
-
-// Older backends only have /api/separate_all, and they drop the connection
-// on an upload to /api/jobs instead of answering 404, so ask the API which
-// routes it has before uploading.
-let jobsSupported;
-async function backendHasJobs() {
-  if (jobsSupported === undefined) {
-    try {
-      const spec = await (await fetch(`${API}/openapi.json`)).json();
-      jobsSupported = "/api/jobs" in (spec.paths || {});
-    } catch {
-      return true; // can't tell; the job API will surface its own error
-    }
-  }
-  return jobsSupported;
-}
 
 // Overall progress is split across the steps the user waits on
 const STAGE = { upload: [0, 6], loading: [6, 8], separating: [8, 92], download: [92, 98], unzip: [98, 100] };
@@ -278,7 +244,6 @@ export default function App() {
   const [activeStems, setActiveStems] = useState(ALL_STEMS); // stems shown in done state
   const [progress, setProgress] = useState(0);
   const [stemUrls, setStemUrls] = useState({});
-  const [stemExt, setStemExt] = useState("mp3");      // mp3, or wav from an older backend
   const [peaks, setPeaks] = useState({});           // { [stemId]: Float32Array } waveform min/max pairs
   const [volumes, setVolumes] = useState(() => Object.fromEntries(ALL_STEMS.map(st => [st.id, 1])));
   const [masterVolume, setMasterVolume] = useState(0.9);
@@ -620,37 +585,28 @@ export default function App() {
     const { signal } = controller;
 
     try {
-      let zipBlob;
-      if (await backendHasJobs()) {
-        // 1. Upload and start a separation job
-        const form = new FormData();
-        form.append("file", f);
-        const up = await uploadWithProgress(`${API}/api/jobs?quality=${quality}`, form, (frac) => setProgress(stagePct("upload", frac)), signal);
-        zipBlob = await runJob(up, signal);
-      } else {
-        zipBlob = await separateWithoutJobs(f, signal);
-      }
+      // 1. Upload and start a separation job
+      const form = new FormData();
+      form.append("file", f);
+      const up = await uploadWithProgress(`${API}/api/jobs?quality=${quality}`, form, (frac) => setProgress(stagePct("upload", frac)), signal);
+      const zipBlob = await runJob(up, signal);
       if (!zipBlob) return; // cancelled
 
-      // 4. Unzip (the current backend sends MP3s, older ones WAVs)
+      // 4. Unzip
       setPhase("unzipping");
       const zip = await JSZip.loadAsync(zipBlob);
       const urls = {};
-      let ext = "mp3";
       let done = 0;
       for (const stem of ALL_STEMS) {
-        const mp3 = zip.file(`${stem.id}.mp3`);
-        const entry = mp3 || zip.file(`${stem.id}.wav`);
+        const entry = zip.file(`${stem.id}.mp3`);
         if (entry) {
-          if (!mp3) ext = "wav";
-          const blob = new Blob([await entry.async("arraybuffer")], { type: mp3 ? "audio/mpeg" : "audio/wav" });
-          urls[stem.id] = URL.createObjectURL(blob);
+          const mp3 = new Blob([await entry.async("arraybuffer")], { type: "audio/mpeg" });
+          urls[stem.id] = URL.createObjectURL(mp3);
         }
         done++;
         setProgress(stagePct("unzip", done / ALL_STEMS.length));
       }
       setEta({ seconds: 0, at: performance.now() });
-      setStemExt(ext);
       setStemUrls(urls);
       setState("done"); // the loader sees this and opens onto the mixer
 
@@ -690,21 +646,6 @@ export default function App() {
     const zipBlob = await readWithProgress(res, (frac) => setProgress(stagePct("download", frac)));
     jobIdRef.current = null;
     return zipBlob;
-  };
-
-  // Fallback for a backend without /api/jobs: one blocking request, no live progress
-  const separateWithoutJobs = async (f, signal) => {
-    setPhase("separating");
-    setProgress(stagePct("separating", 0));
-    const form = new FormData();
-    form.append("file", f);
-    const res = await fetch(`${API}/api/separate_all`, { method: "POST", body: form, signal });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || "Separation failed. Try a different file.");
-    }
-    setPhase("downloading");
-    return readWithProgress(res, (frac) => setProgress(stagePct("download", frac)));
   };
 
   // ── Reset ───────────────────────────────────────────────
@@ -747,11 +688,11 @@ export default function App() {
     if (!url) return;
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${stem.id}_separated.${stemExt}`;
+    a.download = `${stem.id}_separated.mp3`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-  }, [stemUrls, stemExt]);
+  }, [stemUrls]);
 
   const downloadAll = () => {
     activeStems.forEach((stem, i) => {
@@ -760,7 +701,7 @@ export default function App() {
       setTimeout(() => {
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${stem.id}_separated.${stemExt}`;
+        a.download = `${stem.id}_separated.mp3`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
