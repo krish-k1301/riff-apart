@@ -198,24 +198,12 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
   gap: 48px; align-items: center; min-height: min(68vh, 620px);
 }
 .hero__copy { display: flex; flex-direction: column; gap: 20px; }
-.eyebrow {
-  display: inline-flex; align-items: center; gap: 8px; align-self: flex-start;
-  padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
-  background: #1A1613CC; font-family: var(--font-mono); font-size: 11px; color: var(--text-2);
-}
-.eyebrow__dot {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
-  box-shadow: 0 0 10px var(--accent); animation: pulse 1.6s ease-in-out infinite;
-}
 @keyframes pulse { 50% { opacity: 0.35; } }
 .hero__title {
   font-family: var(--font-head); font-weight: 700; color: var(--text-1);
   font-size: clamp(46px, 5.2vw, 78px); line-height: 0.95; letter-spacing: 0; text-transform: uppercase;
 }
-.hero__title span {
-  background: linear-gradient(90deg, #F4D58D, var(--accent) 45%, #FF6B1A);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-}
+.hero__title span { color: var(--accent); }
 .hero__lede { color: var(--text-2); font-size: 16px; line-height: 1.6; max-width: 46ch; text-wrap: pretty; }
 
 .hero__stats {

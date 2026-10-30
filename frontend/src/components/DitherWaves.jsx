@@ -95,7 +95,7 @@ const prefersReducedMotion = () =>
   window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
 // muted amber so the waves sit behind the text instead of competing with it
-export default function DitherWaves({ paused = false, bg = "#100D0B", ink = "#A3865F", inkDeep = "#45382A" }) {
+export default function DitherWaves({ paused = false, bg = "#100D0B", ink = "#D1933E", inkDeep = "#5A3D1E" }) {
   const containerRef = useRef(null);
   const pausedRef = useRef(paused);
   const wakeRef = useRef(() => {});

@@ -864,7 +864,6 @@ export default function App() {
                 cursor: "pointer", fontFamily: "var(--font-mono)",
               }}>new track</button>
             )}
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--text-3)", letterSpacing: "0.5px" }}>v0.2</div>
           </div>
         </header>
 
@@ -877,7 +876,6 @@ export default function App() {
             <div className="landing">
               <section className="hero">
                 <div className="hero__copy">
-                  <p className="eyebrow"><span className="eyebrow__dot" aria-hidden="true" />6-stem separation · free · no login</p>
                   <h1 className="hero__title">
                     Pull a song apart,<br />
                     <span>hear what’s inside.</span>
