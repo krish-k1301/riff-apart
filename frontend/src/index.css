@@ -27,7 +27,7 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html { color-scheme: dark; -webkit-tap-highlight-color: #FF9F1C33; }
+html { color-scheme: dark; -webkit-tap-highlight-color: #FF9F1C33; overflow-x: clip; } /* full-bleed ticker uses 100vw, which counts the scrollbar */
 body { background: var(--bg); color: var(--text-1); font-family: var(--font-body); touch-action: manipulation; }
 @media (pointer: fine) { html { overscroll-behavior: none; } }
 ::selection { background: var(--accent); color: var(--bg); }
