@@ -76,6 +76,22 @@ function formatTime(s) {
 
 const API = import.meta.env.VITE_API_URL || "";
 
+// Older backends only have /api/separate_all, and they drop the connection
+// on an upload to /api/jobs instead of answering 404, so ask the API which
+// routes it has before uploading.
+let jobsSupported;
+async function backendHasJobs() {
+  if (jobsSupported === undefined) {
+    try {
+      const spec = await (await fetch(`${API}/openapi.json`)).json();
+      jobsSupported = "/api/jobs" in (spec.paths || {});
+    } catch {
+      return true; // can't tell; the job API will surface its own error
+    }
+  }
+  return jobsSupported;
+}
+
 // Overall progress is split across the steps the user waits on
 const STAGE = { upload: [0, 6], loading: [6, 8], separating: [8, 92], download: [92, 98], unzip: [98, 100] };
 const stagePct = (stage, frac) => {
@@ -604,13 +620,16 @@ export default function App() {
     const { signal } = controller;
 
     try {
-      // 1. Upload and start a separation job
-      const form = new FormData();
-      form.append("file", f);
-      const up = await uploadWithProgress(`${API}/api/jobs?quality=${quality}`, form, (frac) => setProgress(stagePct("upload", frac)), signal);
-      const zipBlob = up.status === 404 || up.status === 405
-        ? await separateWithoutJobs(f, signal) // backend that predates /api/jobs
-        : await runJob(up, signal);
+      let zipBlob;
+      if (await backendHasJobs()) {
+        // 1. Upload and start a separation job
+        const form = new FormData();
+        form.append("file", f);
+        const up = await uploadWithProgress(`${API}/api/jobs?quality=${quality}`, form, (frac) => setProgress(stagePct("upload", frac)), signal);
+        zipBlob = await runJob(up, signal);
+      } else {
+        zipBlob = await separateWithoutJobs(f, signal);
+      }
       if (!zipBlob) return; // cancelled
 
       // 4. Unzip (the current backend sends MP3s, older ones WAVs)
