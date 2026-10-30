@@ -977,10 +977,10 @@ export default function App() {
           marginTop: "72px", paddingTop: "20px", borderTop: "1px solid var(--border)",
           fontFamily: "var(--font-mono)", textAlign: "center",
         }}>
-          <div style={{ fontSize: "13px", color: "var(--accent)" }}>
+          <div style={{ fontSize: "13px", color: "var(--text-1)", textShadow: "0 1px 3px #000, 0 0 10px #000" }}>
             built by a guitarist who got tired of bad stems
           </div>
-          <div style={{ fontSize: "11px", color: "var(--text-3)", marginTop: "6px" }}>
+          <div style={{ fontSize: "11px", color: "var(--text-1)", textShadow: "0 1px 3px #000, 0 0 10px #000", marginTop: "6px" }}>
             (amber font btw)
           </div>
         </footer>

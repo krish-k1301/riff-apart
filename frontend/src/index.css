@@ -275,7 +275,7 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 
 .quality__opt:hover { color: var(--text-1); }
 .quality__opt[aria-checked="true"] { background: var(--surface-2); color: var(--accent); }
 .quality__opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.quality__hint { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); }
+.quality__hint { font-family: var(--font-mono); font-size: 11px; color: var(--text-1); text-shadow: 0 1px 3px #000, 0 0 10px #000; }
 
 /* split preview card */
 .split {
