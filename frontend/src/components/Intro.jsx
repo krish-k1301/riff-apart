@@ -5,8 +5,7 @@ import MaskedHeading from "./MaskedHeading/MaskedHeading.jsx";
 const SEEN_KEY = "riffapart:intro-seen";
 const VIDEO_SRC = "/intro/guitar.mp4";
 const POSTER_SRC = "/intro/guitar-poster.webp";
-const WORD = "riffapart";
-const ZOOM_LETTER = 1; // the "i" — its stem is the doorway into the site
+const WORD = "riff apart"; // the gap between the words is the doorway into the site
 
 // Shown inside the letters until real footage lands in public/intro/
 const FALLBACK_SRC = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
@@ -24,21 +23,33 @@ function markSeen() {
 const prefersReducedMotion = () =>
   window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
-// Viewport point inside the stem of the "i", below its dot.
-function findDoorway(stage) {
-  const word = stage.querySelector(".masked-heading__word");
-  const baseline = stage.querySelector(".masked-heading__baseline");
-  const node = word?.firstChild;
-  if (!node || node.nodeType !== 3 || !baseline) return null;
+// Box of one character in a word's text node.
+function charRect(node, index) {
   const range = document.createRange();
-  range.setStart(node, ZOOM_LETTER);
-  range.setEnd(node, ZOOM_LETTER + 1);
-  const glyph = range.getBoundingClientRect();
-  const fontPx = parseFloat(getComputedStyle(word).fontSize) || 100;
-  return {
-    x: glyph.left + glyph.width / 2,
-    y: baseline.getBoundingClientRect().top - fontPx * 0.25,
-  };
+  range.setStart(node, index);
+  range.setEnd(node, index + 1);
+  return range.getBoundingClientRect();
+}
+
+// Viewport point in the gap between "riff" and "apart", at mid-letter height.
+// On narrow screens the words wrap onto two lines, so aim between the lines instead.
+function findDoorway(stage) {
+  const [first, second] = stage.querySelectorAll(".masked-heading__word");
+  const firstText = first?.firstChild;
+  const secondText = second?.firstChild;
+  const baseline = first?.querySelector(".masked-heading__baseline");
+  if (firstText?.nodeType !== 3 || secondText?.nodeType !== 3 || !baseline) return null;
+  const end = charRect(firstText, firstText.length - 1); // the last "f"
+  const start = charRect(secondText, 0); // the "a"
+  const fontPx = parseFloat(getComputedStyle(first).fontSize) || 100;
+  if (Math.abs(end.top - start.top) < fontPx * 0.5) {
+    return {
+      x: (end.right + start.left) / 2,
+      y: baseline.getBoundingClientRect().top - fontPx * 0.25,
+    };
+  }
+  const box = stage.getBoundingClientRect();
+  return { x: box.left + box.width / 2, y: (end.bottom + start.top) / 2 };
 }
 
 export default function Intro({ onDone }) {
@@ -80,7 +91,7 @@ export default function Intro({ onDone }) {
     if (prefersReducedMotion()) {
       tl.to(overlay, { opacity: 0, duration: 0.3, delay: 0.8 });
     } else {
-      // MaskedHeading runs its own ~1.1 s rise; hold briefly, then fly through the "i".
+      // MaskedHeading runs its own ~1.1 s rise; hold briefly, then fly between the words.
       // Measured lazily (function values run when the tween starts) so layout is final.
       let door = null;
       const getDoor = () => {
