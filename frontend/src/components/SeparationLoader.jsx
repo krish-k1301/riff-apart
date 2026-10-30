@@ -86,14 +86,15 @@ export default function SeparationLoader({ progress, eta, status, fileName, quip
       tl.to(root, { opacity: 0, duration: 0.3, delay: 0.3 });
       return () => tl.kill();
     }
-    tl.to({}, { duration: 0.35 }) // let 100% land
-      .to(counterRef.current, { opacity: 0, duration: 0.18, ease: "steps(3)" })
+    // ~1.6 s end to end
+    tl.to({}, { duration: 0.15 }) // let 100% land
+      .to(counterRef.current, { opacity: 0, duration: 0.12, ease: "steps(3)" })
       .add(() => setGlitch(true), "<")
-      .to(hole, { w: 2, h: vh * 0.28, duration: 0.35, ease: "power2.out", onUpdate: paint }, "+=0.15")
-      .to(hole, { w: vw * 0.07, duration: 0.3, ease: "power3.out", onUpdate: paint }, "+=0.05")
-      .to(hole, { w: Math.min(vw * 0.46, 760), h: Math.min(vh * 0.32, 380), duration: 0.55, ease: "expo.inOut", onUpdate: paint })
-      .to(hole, { w: Math.min(vw * 0.5, 820), h: Math.min(vh * 0.35, 410), duration: 0.5, ease: "none", onUpdate: paint })
-      .to(hole, { w: vw + 4, h: vh + 4, duration: 0.65, ease: "expo.inOut", onUpdate: paint });
+      .to(hole, { w: 2, h: vh * 0.28, duration: 0.2, ease: "power2.out", onUpdate: paint }, "+=0.05")
+      .to(hole, { w: vw * 0.07, duration: 0.18, ease: "power3.out", onUpdate: paint })
+      .to(hole, { w: Math.min(vw * 0.46, 760), h: Math.min(vh * 0.32, 380), duration: 0.35, ease: "expo.inOut", onUpdate: paint })
+      .to(hole, { w: Math.min(vw * 0.5, 820), h: Math.min(vh * 0.35, 410), duration: 0.15, ease: "none", onUpdate: paint })
+      .to(hole, { w: vw + 4, h: vh + 4, duration: 0.4, ease: "expo.inOut", onUpdate: paint });
     return () => tl.kill();
   }, [complete]);
 
